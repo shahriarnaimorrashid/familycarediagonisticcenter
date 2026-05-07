@@ -4,9 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
-  TestTube2,
-  FileText,
-  Printer,
   Database,
   Languages,
   Stethoscope,
@@ -31,9 +28,6 @@ import { useData } from '@/app/context/DataContext';
 
 const navItems = [
   { href: '/', icon: LayoutDashboard, labelKey: 'receptionDesk' as const },
-  { href: '/samples', icon: TestTube2, labelKey: 'sampleCollection' as const },
-  { href: '/reports', icon: FileText, labelKey: 'reportEntry' as const },
-  { href: '/print-report', icon: Printer, labelKey: 'reportPrint' as const },
   { href: '/admin', icon: Settings, labelKey: 'adminPanel' as const },
   { href: '/data-management', icon: Database, labelKey: 'dataManagement' as const },
 ];
@@ -42,10 +36,6 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { t, language, setLanguage, data } = useData();
   const { setOpenMobile } = useSidebar();
-
-  const handleNavClick = () => {
-    setOpenMobile(false);
-  };
 
   return (
     <Sidebar>
@@ -74,7 +64,7 @@ export function AppSidebar() {
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.href} onClick={handleNavClick}>
+                      <Link href={item.href} onClick={() => setOpenMobile(false)}>
                         <item.icon className="h-4 w-4" />
                         <span>{t(item.labelKey)}</span>
                       </Link>

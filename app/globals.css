@@ -124,7 +124,7 @@
   }
 }
 
-/* ========== PRINT STYLES ========== */
+/* ========== PRINT STYLES - Optimized for Black & White + Low Ink ========== */
 @media print {
   body * {
     visibility: hidden;
@@ -140,27 +140,46 @@
     left: 0;
     top: 0;
     width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
-  /* Force black & white */
+  /* Force Black & White + Ink Saving */
   * {
-    color: #000 !important;
-    background: #fff !important;
+    color: #000000 !important;
+    background: #ffffff !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    box-shadow: none !important;
   }
 
-  /* Watermark */
-  .watermark {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) rotate(-30deg);
-    font-size: 5rem;
-    color: rgba(0, 0, 0, 0.04) !important;
-    pointer-events: none;
-    z-index: 1000;
-    white-space: nowrap;
-    font-weight: bold;
+  /* Watermark Optimization */
+  .watermark-text {
+    color: rgba(0, 0, 0, 0.07) !important;
+    opacity: 0.15 !important;
+    font-size: 6.5rem !important;
+    font-weight: 700 !important;
+  }
+
+  /* Table Improvements */
+  table, th, td {
+    border-color: #333333 !important;
+  }
+
+  .bg-black, 
+  .text-white,
+  tr.bg-black {
+    background-color: #000000 !important;
+    color: #ffffff !important;
+  }
+
+  /* Hide unnecessary elements */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Better spacing for print */
+  .print-area > div {
+    padding: 40px !important;
   }
 }

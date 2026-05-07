@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -62,13 +63,32 @@ const testCategories = [
   'Other',
 ];
 
-const DEFAULT_PASSWORD = 'family12345';
+const AUTH_HASH_KEY = 'admin_auth_hash';
+const PASSWORD_HASH_KEY = 'admin_password_hash';
 
-function getStoredPassword(): string {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('admin_password') || DEFAULT_PASSWORD;
+// Simple hash function (NOT for production - use proper auth in production)
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
   }
-  return DEFAULT_PASSWORD;
+  return hash.toString(16);
+}
+
+function getStoredHash(): string {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(PASSWORD_HASH_KEY) || simpleHash('family12345');
+  }
+  return simpleHash('family12345');
+}
+
+function isAuthenticated(): boolean {
+  if (typeof window !== 'undefined') {
+    return sessionStorage.getItem(AUTH_HASH_KEY) === getStoredHash();
+  }
+  return false;
 }
 
 export default function AdminPanelPage() {
@@ -85,32 +105,21 @@ export default function AdminPanelPage() {
     updateSettings,
   } = useData();
 
-  // ---------- ALL HOOKS MUST BE AT TOP ----------
   const [authenticated, setAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Admin panel states
   const [showTestDialog, setShowTestDialog] = useState(false);
   const [editingTest, setEditingTest] = useState<Test | null>(null);
-  const [testForm, setTestForm] = useState({
-    name: '',
-    category: 'Biochemistry',
-    price: '',
-    unit: '',
-    reference: '',
-  });
+  const [testForm, setTestForm] = useState({ name: '', category: 'Biochemistry', price: '', unit: '', reference: '' });
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [testCategoryFilter, setTestCategoryFilter] = useState<string>('all');
 
   const [showDoctorDialog, setShowDoctorDialog] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
-  const [doctorForm, setDoctorForm] = useState({
-    name: '',
-    specialization: '',
-    phone: '',
-  });
+  const [doctorForm, setDoctorForm] = useState({ name: '', specialization: '', phone: '' });
   const [deleteDoctorId, setDeleteDoctorId] = useState<string | null>(null);
 
   const [settingsForm, setSettingsForm] = useState({
@@ -121,59 +130,58 @@ export default function AdminPanelPage() {
     phone: data.settings.phone,
     email: data.settings.email,
     watermarkText: data.settings.watermarkText,
-    adminPassword: '', // new field for password change
+    adminPassword: '',
+    cashCollectors: [...(data.settings.cashCollectors || [])],
   });
 
+  // Sync settings when data changes
   useEffect(() => {
-    const stored = sessionStorage.getItem('admin_auth');
-    if (stored === 'true') {
-      setAuthenticated(true);
-    }
+    setSettingsForm(prev => ({
+      ...prev,
+      centerName: data.settings.centerName,
+      centerNameBn: data.settings.centerNameBn,
+      address: data.settings.address,
+      addressBn: data.settings.addressBn,
+      phone: data.settings.phone,
+      email: data.settings.email,
+      watermarkText: data.settings.watermarkText,
+      cashCollectors: [...(data.settings.cashCollectors || [])],
+    }));
+  }, [data.settings]);
+
+  // Auth check
+  useEffect(() => {
+    if (isAuthenticated()) setAuthenticated(true);
   }, []);
 
-  // Login / Logout
   const handleLogin = () => {
-    const storedPassword = getStoredPassword();
-    if (passwordInput === storedPassword) {
+    if (simpleHash(passwordInput) === getStoredHash()) {
       setAuthenticated(true);
-      sessionStorage.setItem('admin_auth', 'true');
+      sessionStorage.setItem(AUTH_HASH_KEY, getStoredHash());
+      setPasswordInput('');
       setPasswordError('');
       toast.success(language === 'bn' ? 'স্বাগতম!' : 'Welcome!');
     } else {
       setPasswordError(language === 'bn' ? 'ভুল পাসওয়ার্ড' : 'Wrong password');
-      toast.error(language === 'bn' ? 'ভুল পাসওয়ার্ড' : 'Wrong password');
     }
   };
 
   const handleLogout = () => {
     setAuthenticated(false);
-    sessionStorage.removeItem('admin_auth');
-    setPasswordInput('');
+    sessionStorage.removeItem(AUTH_HASH_KEY);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleLogin();
-    }
+    if (e.key === 'Enter') handleLogin();
   };
 
-  // ---------- BUSINESS LOGIC ----------
-
-  const filteredTests = testCategoryFilter === 'all'
-    ? data.tests
-    : data.tests.filter(t => t.category === testCategoryFilter);
+  const filteredTests = testCategoryFilter === 'all' ? data.tests : data.tests.filter(t => t.category === testCategoryFilter);
 
   // Test handlers
   const openTestDialog = (test?: Test) => {
     if (test) {
       setEditingTest(test);
-      setTestForm({
-        name: test.name,
-        category: test.category,
-        price: test.price.toString(),
-        unit: test.unit,
-        reference: test.reference,
-      });
+      setTestForm({ name: test.name, category: test.category, price: test.price.toString(), unit: test.unit, reference: test.reference });
     } else {
       setEditingTest(null);
       setTestForm({ name: '', category: 'Biochemistry', price: '', unit: '', reference: '' });
@@ -182,18 +190,14 @@ export default function AdminPanelPage() {
   };
 
   const handleTestSubmit = () => {
-    if (!testForm.name || !testForm.price) {
-      toast.error(language === 'bn' ? 'নাম ও মূল্য আবশ্যক' : 'Name and price are required');
-      return;
-    }
+    const trimmedName = testForm.name.trim();
+    const priceNum = parseFloat(testForm.price);
+    
+    if (!trimmedName) { toast.error(language === 'bn' ? 'নাম আবশ্যক' : 'Name is required'); return; }
+    if (isNaN(priceNum) || priceNum < 0) { toast.error(language === 'bn' ? 'সঠিক মূল্য দিন' : 'Enter valid price'); return; }
 
-    const testData = {
-      name: testForm.name,
-      category: testForm.category,
-      price: parseFloat(testForm.price),
-      unit: testForm.unit,
-      reference: testForm.reference,
-    };
+    setIsLoading(true);
+    const testData = { name: trimmedName, category: testForm.category, price: priceNum, unit: testForm.unit.trim(), reference: testForm.reference.trim() };
 
     if (editingTest) {
       updateTest(editingTest.id, testData);
@@ -202,7 +206,11 @@ export default function AdminPanelPage() {
       addTest(testData);
       toast.success(t('testSaved'));
     }
+
     setShowTestDialog(false);
+    setTestForm({ name: '', category: 'Biochemistry', price: '', unit: '', reference: '' });
+    setEditingTest(null);
+    setIsLoading(false);
   };
 
   const handleDeleteTest = () => {
@@ -226,19 +234,27 @@ export default function AdminPanelPage() {
   };
 
   const handleDoctorSubmit = () => {
-    if (!doctorForm.name || !doctorForm.specialization) {
+    const trimmedName = doctorForm.name.trim();
+    const trimmedSpec = doctorForm.specialization.trim();
+    
+    if (!trimmedName || !trimmedSpec) {
       toast.error(language === 'bn' ? 'নাম ও বিশেষজ্ঞতা আবশ্যক' : 'Name and specialization are required');
       return;
     }
 
+    setIsLoading(true);
     if (editingDoctor) {
-      updateDoctor(editingDoctor.id, doctorForm);
+      updateDoctor(editingDoctor.id, { name: trimmedName, specialization: trimmedSpec, phone: doctorForm.phone.trim() });
       toast.success(t('doctorUpdated'));
     } else {
-      addDoctor(doctorForm);
+      addDoctor({ name: trimmedName, specialization: trimmedSpec, phone: doctorForm.phone.trim() });
       toast.success(t('doctorSaved'));
     }
+
     setShowDoctorDialog(false);
+    setDoctorForm({ name: '', specialization: '', phone: '' });
+    setEditingDoctor(null);
+    setIsLoading(false);
   };
 
   const handleDeleteDoctor = () => {
@@ -249,20 +265,24 @@ export default function AdminPanelPage() {
     }
   };
 
-  // Settings handler (with password update)
+  // Settings handler
   const handleSaveSettings = () => {
+    setIsLoading(true);
     const { adminPassword, ...rest } = settingsForm;
     updateSettings(rest);
 
     if (adminPassword && adminPassword.trim() !== '') {
-      localStorage.setItem('admin_password', adminPassword.trim());
+      const hash = simpleHash(adminPassword.trim());
+      localStorage.setItem(PASSWORD_HASH_KEY, hash);
+      sessionStorage.setItem(AUTH_HASH_KEY, hash);
       toast.success(language === 'bn' ? 'পাসওয়ার্ড পরিবর্তিত হয়েছে' : 'Password changed');
     }
 
     toast.success(t('settingsSaved'));
+    setIsLoading(false);
   };
 
-  // ---------- RENDER: LOGIN OR ADMIN ----------
+  // Login screen
   if (!authenticated) {
     return (
       <div className="flex items-center justify-center min-h-[70vh]">
@@ -275,9 +295,7 @@ export default function AdminPanelPage() {
               {language === 'bn' ? 'অ্যাডমিন লগইন' : 'Admin Login'}
             </CardTitle>
             <CardDescription>
-              {language === 'bn'
-                ? 'অনুগ্রহ করে পাসওয়ার্ড দিন'
-                : 'Please enter password to continue'}
+              {language === 'bn' ? 'অনুগ্রহ করে পাসওয়ার্ড দিন' : 'Please enter password to continue'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -295,18 +313,20 @@ export default function AdminPanelPage() {
                   placeholder="••••••••"
                   className={passwordError ? 'border-destructive' : ''}
                   autoFocus
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
               {passwordError && <p className="text-sm text-destructive">{passwordError}</p>}
             </div>
-            <Button onClick={handleLogin} className="w-full">
+            <Button onClick={handleLogin} className="w-full" disabled={isLoading}>
               <Lock className="h-4 w-4 mr-2" />
               {language === 'bn' ? 'লগইন' : 'Login'}
             </Button>
@@ -316,12 +336,12 @@ export default function AdminPanelPage() {
     );
   }
 
-  // Authenticated – Admin Panel
+  // Authenticated admin panel
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">{t('adminPanel')}</h2>
-        <Button variant="outline" size="sm" onClick={handleLogout}>
+        <Button variant="outline" size="sm" onClick={handleLogout} disabled={isLoading}>
           <LogOut className="h-4 w-4 mr-2" />
           {language === 'bn' ? 'লগআউট' : 'Logout'}
         </Button>
@@ -343,16 +363,14 @@ export default function AdminPanelPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ---------- TEST MASTER ---------- */}
+        {/* TEST MASTER */}
         <TabsContent value="tests">
           <Card>
             <CardHeader>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <CardTitle>{t('testMaster')}</CardTitle>
-                  <CardDescription>
-                    {data.tests.length} {language === 'bn' ? 'টি টেস্ট' : 'tests'}
-                  </CardDescription>
+                  <CardDescription>{data.tests.length} {language === 'bn' ? 'টি টেস্ট' : 'tests'}</CardDescription>
                 </div>
                 <div className="flex gap-2">
                   <Select value={testCategoryFilter} onValueChange={setTestCategoryFilter}>
@@ -362,7 +380,7 @@ export default function AdminPanelPage() {
                       {testCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Button onClick={() => openTestDialog()}>
+                  <Button onClick={() => openTestDialog()} disabled={isLoading}>
                     <Plus className="h-4 w-4 mr-1" /> {t('addNewTest')}
                   </Button>
                 </div>
@@ -372,43 +390,45 @@ export default function AdminPanelPage() {
               {filteredTests.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">{t('noTests')}</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('id')}</TableHead>
-                      <TableHead>{t('testName')}</TableHead>
-                      <TableHead>{t('testCategory')}</TableHead>
-                      <TableHead className="text-right">{t('testPrice')}</TableHead>
-                      <TableHead>{t('testUnit')}</TableHead>
-                      <TableHead>{t('testReference')}</TableHead>
-                      <TableHead className="text-right">{t('actions')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredTests.map(test => (
-                      <TableRow key={test.id}>
-                        <TableCell className="font-mono text-xs">{test.id}</TableCell>
-                        <TableCell>{test.name}</TableCell>
-                        <TableCell>{test.category}</TableCell>
-                        <TableCell className="text-right">{test.price}</TableCell>
-                        <TableCell>{test.unit || '-'}</TableCell>
-                        <TableCell>{test.reference || '-'}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openTestDialog(test)}><Pencil className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" onClick={() => setDeleteTestId(test.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                          </div>
-                        </TableCell>
+                <ScrollArea className="w-full">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('id')}</TableHead>
+                        <TableHead>{t('testName')}</TableHead>
+                        <TableHead>{t('testCategory')}</TableHead>
+                        <TableHead className="text-right">{t('testPrice')}</TableHead>
+                        <TableHead>{t('testUnit')}</TableHead>
+                        <TableHead>{t('testReference')}</TableHead>
+                        <TableHead className="text-right">{t('actions')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTests.map(test => (
+                        <TableRow key={test.id}>
+                          <TableCell className="font-mono text-xs">{test.id}</TableCell>
+                          <TableCell>{test.name}</TableCell>
+                          <TableCell>{test.category}</TableCell>
+                          <TableCell className="text-right">{test.price}</TableCell>
+                          <TableCell>{test.unit || '-'}</TableCell>
+                          <TableCell>{test.reference || '-'}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => openTestDialog(test)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => setDeleteTestId(test.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* ---------- DOCTOR LIST ---------- */}
+        {/* DOCTOR LIST */}
         <TabsContent value="doctors">
           <Card>
             <CardHeader>
@@ -417,46 +437,50 @@ export default function AdminPanelPage() {
                   <CardTitle>{t('doctorList')}</CardTitle>
                   <CardDescription>{data.doctors.length} {language === 'bn' ? 'জন ডাক্তার' : 'doctors'}</CardDescription>
                 </div>
-                <Button onClick={() => openDoctorDialog()}><Plus className="h-4 w-4 mr-1" /> {t('addDoctor')}</Button>
+                <Button onClick={() => openDoctorDialog()} disabled={isLoading}>
+                  <Plus className="h-4 w-4 mr-1" /> {t('addDoctor')}
+                </Button>
               </div>
             </CardHeader>
             <CardContent>
               {data.doctors.length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">{t('noDoctors')}</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('id')}</TableHead>
-                      <TableHead>{t('doctorName')}</TableHead>
-                      <TableHead>{t('specialization')}</TableHead>
-                      <TableHead>{t('mobile')}</TableHead>
-                      <TableHead className="text-right">{t('actions')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.doctors.map(doctor => (
-                      <TableRow key={doctor.id}>
-                        <TableCell className="font-mono text-xs">{doctor.id}</TableCell>
-                        <TableCell>{doctor.name}</TableCell>
-                        <TableCell>{doctor.specialization}</TableCell>
-                        <TableCell>{doctor.phone || '-'}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="icon" onClick={() => openDoctorDialog(doctor)}><Pencil className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" onClick={() => setDeleteDoctorId(doctor.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                          </div>
-                        </TableCell>
+                <ScrollArea className="w-full">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('id')}</TableHead>
+                        <TableHead>{t('doctorName')}</TableHead>
+                        <TableHead>{t('specialization')}</TableHead>
+                        <TableHead>{t('mobile')}</TableHead>
+                        <TableHead className="text-right">{t('actions')}</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {data.doctors.map(doctor => (
+                        <TableRow key={doctor.id}>
+                          <TableCell className="font-mono text-xs">{doctor.id}</TableCell>
+                          <TableCell>{doctor.name}</TableCell>
+                          <TableCell>{doctor.specialization}</TableCell>
+                          <TableCell>{doctor.phone || '-'}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => openDoctorDialog(doctor)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => setDeleteDoctorId(doctor.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* ---------- CENTER SETTINGS (with password change) ---------- */}
+        {/* CENTER SETTINGS */}
         <TabsContent value="settings">
           <Card>
             <CardHeader>
@@ -491,39 +515,128 @@ export default function AdminPanelPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>{t('watermarkText')}</Label>
-                  <Input value={settingsForm.watermarkText} onChange={e => setSettingsForm({ ...settingsForm, watermarkText: e.target.value })} placeholder="Family Care Diagnostic Center" />
+                  <Input value={settingsForm.watermarkText} onChange={e => setSettingsForm({ ...settingsForm, watermarkText: e.target.value })} />
                 </div>
 
-                {/* ---------- CHANGE ADMIN PASSWORD ---------- */}
+                {/* Cash Collectors */}
+                <div className="space-y-2 md:col-span-2">
+                  <Label>{language === 'bn' ? 'ক্যাশ সংগ্রহকারী' : 'Cash Collectors'}</Label>
+                  <div className="space-y-2">
+                    {(settingsForm.cashCollectors || []).map((name: string, idx: number) => (
+                      <div key={idx} className="flex gap-2">
+                        <Input value={name} onChange={(e) => { const updated = [...(settingsForm.cashCollectors || [])]; updated[idx] = e.target.value; setSettingsForm({ ...settingsForm, cashCollectors: updated }); }} placeholder={`${language === 'bn' ? 'নাম' : 'Name'} ${idx + 1}`} />
+                        <Button variant="ghost" size="icon" onClick={() => { const updated = (settingsForm.cashCollectors || []).filter((_: string, i: number) => i !== idx); setSettingsForm({ ...settingsForm, cashCollectors: updated }); }}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    ))}
+                    <Button variant="outline" size="sm" onClick={() => setSettingsForm({ ...settingsForm, cashCollectors: [...(settingsForm.cashCollectors || []), ''] })}><Plus className="h-4 w-4 mr-1" /> {language === 'bn' ? 'নতুন যোগ করুন' : 'Add Collector'}</Button>
+                  </div>
+                </div>
+
+                {/* Change Admin Password */}
                 <div className="space-y-2">
                   <Label>{language === 'bn' ? 'অ্যাডমিন পাসওয়ার্ড' : 'Admin Password'}</Label>
-                  <Input
-                    type="password"
-                    value={settingsForm.adminPassword}
-                    onChange={e => setSettingsForm({ ...settingsForm, adminPassword: e.target.value })}
-                    placeholder={language === 'bn' ? 'নতুন পাসওয়ার্ড (খালি রাখলে অপরিবর্তিত)' : 'New password (leave blank to keep)'}
-                  />
+                  <Input type="password" value={settingsForm.adminPassword} onChange={e => setSettingsForm({ ...settingsForm, adminPassword: e.target.value })} placeholder={language === 'bn' ? 'নতুন পাসওয়ার্ড (খালি রাখলে অপরিবর্তিত)' : 'New password (leave blank to keep)'} />
                 </div>
               </div>
 
               <div className="flex justify-end">
-                <Button onClick={handleSaveSettings}>{t('save')}</Button>
+                <Button onClick={handleSaveSettings} disabled={isLoading}>{t('save')}</Button>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      {/* ---------- DIALOGS ---------- */}
+      {/* Test Dialog */}
       <Dialog open={showTestDialog} onOpenChange={setShowTestDialog}>
         <DialogContent>
           <DialogHeader><DialogTitle>{editingTest ? t('editTest') : t('addNewTest')}</DialogTitle></DialogHeader>
-          {/* ... rest of test dialog ... */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>{t('testName')} *</Label>
+              <Input value={testForm.name} onChange={e => setTestForm({ ...testForm, name: e.target.value })} placeholder={t('enterTestName')} />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>{t('testCategory')} *</Label>
+                <Select value={testForm.category} onValueChange={(v) => setTestForm({ ...testForm, category: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{testCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>{t('testPrice')} (BDT) *</Label>
+                <Input type="number" value={testForm.price} onChange={e => setTestForm({ ...testForm, price: e.target.value })} placeholder={t('enterPrice')} min="0" />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('testUnit')}</Label>
+                <Input value={testForm.unit} onChange={e => setTestForm({ ...testForm, unit: e.target.value })} placeholder={t('enterUnit')} />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('testReference')}</Label>
+                <Input value={testForm.reference} onChange={e => setTestForm({ ...testForm, reference: e.target.value })} placeholder={t('enterReference')} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTestDialog(false)}>{t('cancel')}</Button>
+            <Button onClick={handleTestSubmit} disabled={isLoading}>{editingTest ? t('update') : t('save')}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Other dialogs (same as before) */}
-      {/* ... (keep your existing dialog code, I included them in the full version but you can keep yours) ... */}
+      {/* Doctor Dialog */}
+      <Dialog open={showDoctorDialog} onOpenChange={setShowDoctorDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{editingDoctor ? t('editDoctor') : t('addDoctor')}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>{t('doctorName')} *</Label>
+              <Input value={doctorForm.name} onChange={e => setDoctorForm({ ...doctorForm, name: e.target.value })} placeholder={t('enterName')} />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('specialization')} *</Label>
+              <Input value={doctorForm.specialization} onChange={e => setDoctorForm({ ...doctorForm, specialization: e.target.value })} placeholder={language === 'bn' ? 'যেমন: মেডিসিন' : 'e.g., Medicine'} />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('mobile')}</Label>
+              <Input value={doctorForm.phone} onChange={e => setDoctorForm({ ...doctorForm, phone: e.target.value })} placeholder="01XXXXXXXXX" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDoctorDialog(false)}>{t('cancel')}</Button>
+            <Button onClick={handleDoctorSubmit} disabled={isLoading}>{editingDoctor ? t('update') : t('save')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Test Dialog */}
+      <AlertDialog open={!!deleteTestId} onOpenChange={() => setDeleteTestId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('deleteTest')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('deleteTestConfirm')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteTest} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('delete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Doctor Dialog */}
+      <AlertDialog open={!!deleteDoctorId} onOpenChange={() => setDeleteDoctorId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('deleteDoctor')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('deleteDoctorConfirm')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteDoctor} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('delete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

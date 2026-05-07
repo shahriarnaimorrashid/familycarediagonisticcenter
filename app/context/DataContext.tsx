@@ -40,6 +40,7 @@ export interface Bill {
   paid: number;
   change: number;
   referredDoctor?: string;
+  cashCollector?: string;
   date: string;
 }
 
@@ -74,6 +75,7 @@ export interface Settings {
   phone: string;
   email: string;
   watermarkText: string;
+  cashCollectors: string[];
 }
 
 export interface DataStore {
@@ -110,6 +112,7 @@ const defaultSettings: Settings = {
   phone: '01712-345678',
   email: 'info@familycare.com',
   watermarkText: 'Family Care Diagnostic Center',
+  cashCollectors: ['Receptionist-1', 'Receptionist-2'],
 };
 
 const initialData: DataStore = {
@@ -119,11 +122,7 @@ const initialData: DataStore = {
   bills: [],
   samples: [],
   reports: [],
-  counters: {
-    patientId: 0,
-    billId: 0,
-    doctorId: 0,
-  },
+  counters: { patientId: 0, billId: 0, doctorId: 0 },
   settings: defaultSettings,
 };
 
@@ -133,53 +132,32 @@ interface DataContextType {
   language: Language;
   t: (key: TranslationKey) => string;
   setLanguage: (lang: Language) => void;
-  
-  // Patient operations
   addPatient: (patient: Omit<Patient, 'id' | 'regDate'>) => Patient;
   updatePatient: (id: string, patient: Partial<Omit<Patient, 'id'>>) => void;
   deletePatient: (id: string) => void;
-  
-  // Test operations
   addTest: (test: Omit<Test, 'id'>) => void;
   updateTest: (id: string, test: Partial<Omit<Test, 'id'>>) => void;
   deleteTest: (id: string) => void;
-  
-  // Doctor operations
   addDoctor: (doctor: Omit<Doctor, 'id'>) => void;
   updateDoctor: (id: string, doctor: Partial<Omit<Doctor, 'id'>>) => void;
   deleteDoctor: (id: string) => void;
-  
-  // Bill operations
   addBill: (bill: Omit<Bill, 'billNo' | 'date'>) => string;
-  
-  // Sample operations
   addSample: (sample: Sample) => void;
-  
-  // Report operations
   addOrUpdateReport: (report: Report) => void;
-  
-  // Settings operations
   updateSettings: (settings: Partial<Settings>) => void;
-  
-  // Data management
   exportData: () => void;
   importData: (jsonData: string) => boolean;
   clearAllData: () => void;
-  
-  // Helpers
   getPatientById: (id: string) => Patient | undefined;
   getTestById: (id: string) => Test | undefined;
   getDoctorById: (id: string) => Doctor | undefined;
   getBillByNo: (billNo: string) => Bill | undefined;
   getSampleByBillNo: (billNo: string) => Sample | undefined;
   getReportByBillNo: (billNo: string) => Report | undefined;
-  
-  // Reference range parsing
   checkResultStatus: (value: string, reference: string) => 'normal' | 'abnormal' | '';
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
-
 const STORAGE_KEY = 'fc_dc_data';
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
@@ -187,7 +165,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<Language>('bn');
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load data from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -205,341 +182,153 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           setData(initialData);
         }
       }
-      
       const storedLang = localStorage.getItem('fc_dc_language');
-      if (storedLang === 'en' || storedLang === 'bn') {
-        setLanguage(storedLang);
-      }
-      
+      if (storedLang === 'en' || storedLang === 'bn') setLanguage(storedLang);
       setIsLoaded(true);
     }
   }, []);
 
-  // Save data to localStorage whenever it changes
   useEffect(() => {
-    if (isLoaded && typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    }
+    if (isLoaded && typeof window !== 'undefined') localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data, isLoaded]);
 
-  // Save language preference
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('fc_dc_language', language);
-    }
+    if (typeof window !== 'undefined') localStorage.setItem('fc_dc_language', language);
   }, [language]);
 
-  // Translation function
-  const t = useCallback((key: TranslationKey): string => {
-    return translations[language][key] || key;
-  }, [language]);
+  const t = useCallback((key: TranslationKey): string => translations[language][key] || key, [language]);
 
-  // Reference range checking with support for <, >, ≤, ≥, and hyphen ranges
   const checkResultStatus = useCallback((value: string, reference: string): 'normal' | 'abnormal' | '' => {
-    if (!value || !reference || reference.toLowerCase() === 'see report' || reference.toLowerCase() === 'normal') {
-      return '';
-    }
-
+    if (!value || !reference || reference.toLowerCase() === 'see report' || reference.toLowerCase() === 'normal') return '';
     const numValue = parseFloat(value);
-    if (isNaN(numValue)) {
-      return '';
-    }
-
+    if (isNaN(numValue)) return '';
     const ref = reference.trim();
-
-    // Handle < operator
-    if (ref.startsWith('<')) {
-      const limit = parseFloat(ref.substring(1).trim());
-      if (!isNaN(limit)) {
-        return numValue < limit ? 'normal' : 'abnormal';
-      }
-    }
-
-    // Handle ≤ operator
-    if (ref.startsWith('≤') || ref.startsWith('<=')) {
-      const limit = parseFloat(ref.replace(/^(≤|<=)/, '').trim());
-      if (!isNaN(limit)) {
-        return numValue <= limit ? 'normal' : 'abnormal';
-      }
-    }
-
-    // Handle > operator
-    if (ref.startsWith('>')) {
-      const limit = parseFloat(ref.substring(1).trim());
-      if (!isNaN(limit)) {
-        return numValue > limit ? 'normal' : 'abnormal';
-      }
-    }
-
-    // Handle ≥ operator
-    if (ref.startsWith('≥') || ref.startsWith('>=')) {
-      const limit = parseFloat(ref.replace(/^(≥|>=)/, '').trim());
-      if (!isNaN(limit)) {
-        return numValue >= limit ? 'normal' : 'abnormal';
-      }
-    }
-
-    // Handle hyphen range (e.g., "70-100" or "0.4-4.0")
+    if (ref.startsWith('<')) { const limit = parseFloat(ref.substring(1).trim()); if (!isNaN(limit)) return numValue < limit ? 'normal' : 'abnormal'; }
+    if (ref.startsWith('≤') || ref.startsWith('<=')) { const limit = parseFloat(ref.replace(/^(≤|<=)/, '').trim()); if (!isNaN(limit)) return numValue <= limit ? 'normal' : 'abnormal'; }
+    if (ref.startsWith('>')) { const limit = parseFloat(ref.substring(1).trim()); if (!isNaN(limit)) return numValue > limit ? 'normal' : 'abnormal'; }
+    if (ref.startsWith('≥') || ref.startsWith('>=')) { const limit = parseFloat(ref.replace(/^(≥|>=)/, '').trim()); if (!isNaN(limit)) return numValue >= limit ? 'normal' : 'abnormal'; }
     const rangeMatch = ref.match(/^([\d.]+)\s*[-–]\s*([\d.]+)$/);
-    if (rangeMatch) {
-      const low = parseFloat(rangeMatch[1]);
-      const high = parseFloat(rangeMatch[2]);
-      if (!isNaN(low) && !isNaN(high)) {
-        return numValue >= low && numValue <= high ? 'normal' : 'abnormal';
-      }
-    }
-
+    if (rangeMatch) { const low = parseFloat(rangeMatch[1]); const high = parseFloat(rangeMatch[2]); if (!isNaN(low) && !isNaN(high)) return numValue >= low && numValue <= high ? 'normal' : 'abnormal'; }
     return '';
   }, []);
 
-  // Patient operations
   const addPatient = useCallback((patient: Omit<Patient, 'id' | 'regDate'>): Patient => {
     let newPatient: Patient = {} as Patient;
     setData(prev => {
       const newId = prev.counters.patientId + 1;
-      newPatient = {
-        ...patient,
-        id: `P${String(newId).padStart(3, '0')}`,
-        regDate: new Date().toISOString().split('T')[0],
-      };
-      return {
-        ...prev,
-        patients: [...prev.patients, newPatient],
-        counters: { ...prev.counters, patientId: newId },
-      };
+      newPatient = { ...patient, id: `P${String(newId).padStart(3, '0')}`, regDate: new Date().toISOString().split('T')[0] };
+      return { ...prev, patients: [...prev.patients, newPatient], counters: { ...prev.counters, patientId: newId } };
     });
     return newPatient;
   }, []);
 
   const updatePatient = useCallback((id: string, patient: Partial<Omit<Patient, 'id'>>) => {
-    setData(prev => ({
-      ...prev,
-      patients: prev.patients.map(p => 
-        p.id === id ? { ...p, ...patient } : p
-      ),
-    }));
+    setData(prev => ({ ...prev, patients: prev.patients.map(p => p.id === id ? { ...p, ...patient } : p) }));
   }, []);
 
   const deletePatient = useCallback((id: string) => {
-    setData(prev => ({
-      ...prev,
-      patients: prev.patients.filter(p => p.id !== id),
-    }));
+    setData(prev => ({ ...prev, patients: prev.patients.filter(p => p.id !== id) }));
   }, []);
 
-  // Test operations
   const addTest = useCallback((test: Omit<Test, 'id'>) => {
     setData(prev => {
-      const existingIds = prev.tests.map(t => parseInt(t.id.replace('T', '')) || 0);
-      const maxId = Math.max(0, ...existingIds);
-      const newId = `T${String(maxId + 1).padStart(3, '0')}`;
-      return {
-        ...prev,
-        tests: [...prev.tests, { ...test, id: newId }],
-      };
+      const maxId = Math.max(0, ...prev.tests.map(t => parseInt(t.id.replace('T', '')) || 0));
+      return { ...prev, tests: [...prev.tests, { ...test, id: `T${String(maxId + 1).padStart(3, '0')}` }] };
     });
   }, []);
 
   const updateTest = useCallback((id: string, test: Partial<Omit<Test, 'id'>>) => {
-    setData(prev => ({
-      ...prev,
-      tests: prev.tests.map(t => 
-        t.id === id ? { ...t, ...test } : t
-      ),
-    }));
+    setData(prev => ({ ...prev, tests: prev.tests.map(t => t.id === id ? { ...t, ...test } : t) }));
   }, []);
 
   const deleteTest = useCallback((id: string) => {
-    setData(prev => ({
-      ...prev,
-      tests: prev.tests.filter(t => t.id !== id),
-    }));
+    setData(prev => ({ ...prev, tests: prev.tests.filter(t => t.id !== id) }));
   }, []);
 
-  // Doctor operations
   const addDoctor = useCallback((doctor: Omit<Doctor, 'id'>) => {
     setData(prev => {
       const newId = prev.counters.doctorId + 1;
-      const newDoctor: Doctor = {
-        ...doctor,
-        id: `D${String(newId).padStart(3, '0')}`,
-      };
-      return {
-        ...prev,
-        doctors: [...prev.doctors, newDoctor],
-        counters: { ...prev.counters, doctorId: newId },
-      };
+      return { ...prev, doctors: [...prev.doctors, { ...doctor, id: `D${String(newId).padStart(3, '0')}` }], counters: { ...prev.counters, doctorId: newId } };
     });
   }, []);
 
   const updateDoctor = useCallback((id: string, doctor: Partial<Omit<Doctor, 'id'>>) => {
-    setData(prev => ({
-      ...prev,
-      doctors: prev.doctors.map(d => 
-        d.id === id ? { ...d, ...doctor } : d
-      ),
-    }));
+    setData(prev => ({ ...prev, doctors: prev.doctors.map(d => d.id === id ? { ...d, ...doctor } : d) }));
   }, []);
 
   const deleteDoctor = useCallback((id: string) => {
-    setData(prev => ({
-      ...prev,
-      doctors: prev.doctors.filter(d => d.id !== id),
-    }));
+    setData(prev => ({ ...prev, doctors: prev.doctors.filter(d => d.id !== id) }));
   }, []);
 
-  // Bill operations
   const addBill = useCallback((bill: Omit<Bill, 'billNo' | 'date'>): string => {
     let billNo = '';
     setData(prev => {
       const newId = prev.counters.billId + 1;
       billNo = `BILL-${String(newId).padStart(3, '0')}`;
-      const newBill: Bill = {
-        ...bill,
-        billNo,
-        date: new Date().toISOString().split('T')[0],
-      };
-      return {
-        ...prev,
-        bills: [...prev.bills, newBill],
-        counters: { ...prev.counters, billId: newId },
-      };
+      return { ...prev, bills: [...prev.bills, { ...bill, billNo, date: new Date().toISOString().split('T')[0] }], counters: { ...prev.counters, billId: newId } };
     });
     return billNo;
   }, []);
 
-  // Sample operations
   const addSample = useCallback((sample: Sample) => {
-    setData(prev => ({
-      ...prev,
-      samples: [...prev.samples, sample],
-    }));
+    setData(prev => ({ ...prev, samples: [...prev.samples, sample] }));
   }, []);
 
-  // Report operations
   const addOrUpdateReport = useCallback((report: Report) => {
     setData(prev => {
-      const existingIndex = prev.reports.findIndex(r => r.billNo === report.billNo);
-      if (existingIndex >= 0) {
-        const newReports = [...prev.reports];
-        newReports[existingIndex] = report;
-        return { ...prev, reports: newReports };
-      }
+      const idx = prev.reports.findIndex(r => r.billNo === report.billNo);
+      if (idx >= 0) { const newR = [...prev.reports]; newR[idx] = report; return { ...prev, reports: newR }; }
       return { ...prev, reports: [...prev.reports, report] };
     });
   }, []);
 
-  // Settings operations
   const updateSettings = useCallback((settings: Partial<Settings>) => {
-    setData(prev => ({
-      ...prev,
-      settings: { ...prev.settings, ...settings },
-    }));
+    setData(prev => ({ ...prev, settings: { ...prev.settings, ...settings } }));
   }, []);
 
-  // Helper functions
-  const getPatientById = useCallback((id: string) => {
-    return data.patients.find(p => p.id === id);
-  }, [data.patients]);
+  const getPatientById = useCallback((id: string) => data.patients.find(p => p.id === id), [data.patients]);
+  const getTestById = useCallback((id: string) => data.tests.find(t => t.id === id), [data.tests]);
+  const getDoctorById = useCallback((id: string) => data.doctors.find(d => d.id === id), [data.doctors]);
+  const getBillByNo = useCallback((billNo: string) => data.bills.find(b => b.billNo === billNo), [data.bills]);
+  const getSampleByBillNo = useCallback((billNo: string) => data.samples.find(s => s.billNo === billNo), [data.samples]);
+  const getReportByBillNo = useCallback((billNo: string) => data.reports.find(r => r.billNo === billNo), [data.reports]);
 
-  const getTestById = useCallback((id: string) => {
-    return data.tests.find(t => t.id === id);
-  }, [data.tests]);
-
-  const getDoctorById = useCallback((id: string) => {
-    return data.doctors.find(d => d.id === id);
-  }, [data.doctors]);
-
-  const getBillByNo = useCallback((billNo: string) => {
-    return data.bills.find(b => b.billNo === billNo);
-  }, [data.bills]);
-
-  const getSampleByBillNo = useCallback((billNo: string) => {
-    return data.samples.find(s => s.billNo === billNo);
-  }, [data.samples]);
-
-  const getReportByBillNo = useCallback((billNo: string) => {
-    return data.reports.find(r => r.billNo === billNo);
-  }, [data.reports]);
-
-  // Data management
   const exportData = useCallback(() => {
-    const dataStr = JSON.stringify(data, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `family-care-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `family-care-backup-${new Date().toISOString().split('T')[0]}.json`; a.click();
+    URL.revokeObjectURL(a.href);
   }, [data]);
 
   const importData = useCallback((jsonData: string): boolean => {
     try {
       const parsed = JSON.parse(jsonData);
-      if (parsed.patients && parsed.tests && parsed.bills && parsed.samples && parsed.reports && parsed.counters) {
-        setData({
-          ...initialData,
-          ...parsed,
-          settings: { ...defaultSettings, ...parsed.settings },
-        });
+      if (parsed.patients && parsed.tests && parsed.bills) {
+        setData({ ...initialData, ...parsed, settings: { ...defaultSettings, ...parsed.settings } });
         return true;
       }
       return false;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }, []);
 
-  const clearAllData = useCallback(() => {
-    setData(initialData);
-  }, []);
+  const clearAllData = useCallback(() => setData(initialData), []);
 
   const value = useMemo(() => ({
-    data,
-    language,
-    t,
-    setLanguage,
-    addPatient,
-    updatePatient,
-    deletePatient,
-    addTest,
-    updateTest,
-    deleteTest,
-    addDoctor,
-    updateDoctor,
-    deleteDoctor,
-    addBill,
-    addSample,
-    addOrUpdateReport,
-    updateSettings,
-    exportData,
-    importData,
-    clearAllData,
-    getPatientById,
-    getTestById,
-    getDoctorById,
-    getBillByNo,
-    getSampleByBillNo,
-    getReportByBillNo,
-    checkResultStatus,
-  }), [data, language, t, addPatient, updatePatient, deletePatient, addTest, updateTest, deleteTest, addDoctor, updateDoctor, deleteDoctor, addBill, addSample, addOrUpdateReport, updateSettings, exportData, importData, clearAllData, getPatientById, getTestById, getDoctorById, getBillByNo, getSampleByBillNo, getReportByBillNo, checkResultStatus]);
+    data, language, t, setLanguage, addPatient, updatePatient, deletePatient, addTest, updateTest, deleteTest,
+    addDoctor, updateDoctor, deleteDoctor, addBill, addSample, addOrUpdateReport, updateSettings,
+    exportData, importData, clearAllData, getPatientById, getTestById, getDoctorById, getBillByNo,
+    getSampleByBillNo, getReportByBillNo, checkResultStatus,
+  }), [data, language, t, addPatient, updatePatient, deletePatient, addTest, updateTest, deleteTest,
+      addDoctor, updateDoctor, deleteDoctor, addBill, addSample, addOrUpdateReport, updateSettings,
+      exportData, importData, clearAllData, getPatientById, getTestById, getDoctorById, getBillByNo,
+      getSampleByBillNo, getReportByBillNo, checkResultStatus]);
 
-  if (!isLoaded) {
-    return null;
-  }
-
-  return (
-    <DataContext.Provider value={value}>
-      {children}
-    </DataContext.Provider>
-  );
+  if (!isLoaded) return null;
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
 
 export function useData() {
   const context = useContext(DataContext);
-  if (!context) {
-    throw new Error('useData must be used within a DataProvider');
-  }
+  if (!context) throw new Error('useData must be used within a DataProvider');
   return context;
 }

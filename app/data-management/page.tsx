@@ -301,14 +301,16 @@ export default function DataManagementPage() {
               <AlertTriangle className="h-5 w-5" />
               {t('clearAllData')}
             </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-4">
-              <p>{t('clearDataDoubleConfirm')}</p>
-              <Input
-                placeholder="Type DELETE to confirm"
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
-                className="font-mono"
-              />
+            <AlertDialogDescription asChild>
+              <div className="space-y-4">
+                <span>{t('clearDataDoubleConfirm')}</span>
+                <Input
+                  placeholder="Type DELETE to confirm"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  className="font-mono"
+                />
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
